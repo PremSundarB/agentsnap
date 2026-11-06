@@ -114,3 +114,46 @@ def test_same_size_edit_is_detected(repo, tmp_path):
     p = tmp_path / "copy/README.md"
     p.write_text("# DEMO\n")  # same length, new mtime
     assert diff_trees(repo, tmp_path / "copy").modified == {"README.md"}
+
+
+def _same_mtime(src, dst):
+    """Give ``dst`` exactly ``src``'s mtime, as if both were written in one clock tick."""
+    st = os.lstat(src)
+    os.utime(dst, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
+def test_same_content_does_not_trust_equal_signatures(tmp_path):
+    # Two independently written files with the same size and mtime (which
+    # happens when two agents write in the same tick) are still different.
+    a = write(tmp_path, "a.txt", "agent 0 step 19\n")
+    b = write(tmp_path, "b.txt", "agent 1 step 19\n")
+    _same_mtime(a, b)
+    assert file_sig(a) == file_sig(b)
+    assert not same_content(a, b)
+
+
+def test_diff_trees_racy_edit_is_detected(tmp_path):
+    # An edit that keeps the size, made in the same tick as the snapshot,
+    # leaves the signature unchanged; the racy check must still catch it.
+    base, tree = tmp_path / "base", tmp_path / "tree"
+    b = write(base, "f.txt", "aaaa\n")
+    t = write(tree, "f.txt", "bbbb\n")
+    _same_mtime(b, t)
+    assert diff_trees(base, tree).modified == frozenset()  # signatures alone are fooled
+    racy_after = os.lstat(b).st_mtime_ns - 1
+    assert diff_trees(base, tree, racy_after_ns=racy_after).modified == {"f.txt"}
+
+
+def test_diff_trees_old_identical_signatures_are_not_hashed(tmp_path, monkeypatch):
+    base, tree = tmp_path / "base", tmp_path / "tree"
+    b = write(base, "f.txt", "same\n")
+    t = write(tree, "f.txt", "same\n")
+    _same_mtime(b, t)
+
+    import agentsnap.tracking as tracking
+
+    calls = []
+    monkeypatch.setattr(tracking, "hash_file", lambda p: calls.append(p) or "x")
+    racy_after = os.lstat(b).st_mtime_ns + 10**9  # the file predates the snapshot
+    assert not diff_trees(base, tree, racy_after_ns=racy_after)
+    assert calls == []

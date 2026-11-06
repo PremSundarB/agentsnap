@@ -92,12 +92,16 @@ def file_sig(path: Path) -> Sig | None:
 
 
 def same_content(a: Path, b: Path) -> bool:
-    """True if ``a`` and ``b`` hold the same content (both missing counts as same)."""
+    """True if ``a`` and ``b`` hold the same content (both missing counts as same).
+
+    Equal size and mtime do *not* prove equal content for two files written
+    independently: two agents writing same-length text in the same clock tick
+    (Linux timestamps can be milliseconds coarse) get identical signatures.
+    So beyond a cheap size check, this always compares hashes.
+    """
     sa, sb = file_sig(a), file_sig(b)
     if sa is None or sb is None:
         return sa is None and sb is None
-    if sa == sb:
-        return True  # fast path: clones keep size and mtime
     if sa[0] != sb[0] or (sa[0] == "f" and sa[1] != sb[1]):
         return False
     return hash_file(a) == hash_file(b)
@@ -136,13 +140,30 @@ def build_manifest(root: Path, ignore: Iterable[str] = DEFAULT_IGNORES) -> Manif
     return manifest
 
 
-def diff_trees(base_root: Path, root: Path, ignore: Iterable[str] = DEFAULT_IGNORES) -> ChangeSet:
-    """Files added, modified or deleted in ``root`` relative to ``base_root``."""
+def diff_trees(
+    base_root: Path,
+    root: Path,
+    ignore: Iterable[str] = DEFAULT_IGNORES,
+    racy_after_ns: int | None = None,
+) -> ChangeSet:
+    """Files added, modified or deleted in ``root`` relative to ``base_root``.
+
+    A file whose signature equals its base's is taken as unchanged, as in
+    git's index, except when that signature's mtime is at or after
+    ``racy_after_ns`` (just before the snapshot was taken). Such a file could
+    have been edited in the same clock tick as the snapshot without its size
+    changing, so it is hashed instead ("racy git").
+    """
     ignore = frozenset(ignore)
     base, cur = build_manifest(base_root, ignore), build_manifest(root, ignore)
     candidates = diff_manifests(base, cur)
+    racy = (
+        {p for p, sig in base.items() if sig[2] >= racy_after_ns and cur.get(p) == sig}
+        if racy_after_ns is not None
+        else set()
+    )
     modified = frozenset(
-        p for p in candidates.modified if not same_content(Path(base_root) / p, Path(root) / p)
+        p for p in candidates.modified | racy if not same_content(Path(base_root) / p, Path(root) / p)
     )
     return ChangeSet(added=candidates.added, modified=modified, deleted=candidates.deleted)
 

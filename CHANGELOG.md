@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- A second agent's edit could be merged over the first's (silently losing
+  the first) when both wrote same-length text in the same clock tick: equal
+  size and mtime were taken as equal content. Files written independently
+  are now always compared by content. Found by CI on Linux.
+- An edit that kept a file's size and landed in the same clock tick as the
+  snapshot could go unnoticed. Such "racy" files are now re-checked by
+  content, as git does.
+
 ## [0.1.0] - 2026-11-05
 
 First version.

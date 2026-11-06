@@ -294,3 +294,41 @@ def test_check_not_run_when_nothing_to_merge(store):
     store.create("a")
     res = merge_workspace(store, "a", check="exit 1")
     assert res.check is None and res.applied == {}
+
+
+def test_same_tick_edits_by_two_agents_still_conflict(store, repo):
+    """Regression (found by CI on Linux): two agents writing same-length text
+    in the same clock tick get identical size+mtime. The second merge must
+    still be refused, not mistaken for a convergent edit."""
+    import os
+
+    write(repo, "shared.txt", "original\n")
+    a, b = store.create("a"), store.create("b")
+    fa = write(a.tree, "shared.txt", "agent a wrote this\n")
+    fb = write(b.tree, "shared.txt", "agent b wrote this\n")
+    st = os.lstat(fa)
+    os.utime(fb, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+    assert merge_workspace(store, "a").merged
+    result = merge_workspace(store, "b")
+    assert not result.merged
+    assert [c.kind for c in result.conflicts] == ["stale-write"]
+    assert read(repo, "shared.txt") == "agent a wrote this\n"
+
+
+def test_same_size_edit_in_snapshot_tick_is_seen(store, repo):
+    """Racy-git case: the agent's edit keeps the size and lands in the same
+    tick as the snapshot, so its signature equals the base's."""
+    import os
+
+    ws = store.create("w")
+    base_file = ws.base_dir / "docs/guide.txt"
+    edited = GUIDE.upper()
+    assert len(edited) == len(GUIDE)
+    f = write(ws.tree, "docs/guide.txt", edited)
+    st = os.lstat(base_file)
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+    assert store.get("w").changes().modified == {"docs/guide.txt"}
+    assert merge_workspace(store, "w").merged
+    assert read(repo, "docs/guide.txt") == edited

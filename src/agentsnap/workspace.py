@@ -35,6 +35,11 @@ from . import journal
 from .snapshot import clone_path, create_snapshot
 from .tracking import DEFAULT_IGNORES, ChangeSet, ReadLog, diff_trees
 
+# Files whose mtime is within this many seconds before the snapshot are
+# re-checked by content even if their signature looks unchanged. Generous,
+# to cover coarse filesystem timestamps and clock granularity.
+RACY_MARGIN_S = 2.0
+
 try:  # POSIX only; Windows is not supported yet.
     import fcntl
 except ImportError:  # pragma: no cover
@@ -96,6 +101,8 @@ class Workspace:
     # them, and a person must approve before it merges.
     needs_approval: list[str] = field(default_factory=list)
     ignore: frozenset[str] = DEFAULT_IGNORES
+    # When tree/ and base/ were last snapshotted (create or refresh).
+    snapshot_at: float = 0.0
 
     @property
     def tree(self) -> Path:
@@ -111,7 +118,9 @@ class Workspace:
         return ReadLog(self.dir / "reads.jsonl")
 
     def changes(self) -> ChangeSet:
-        return diff_trees(self.base_dir, self.tree, self.ignore)
+        since = self.snapshot_at or self.created_at
+        racy_after_ns = int((since - RACY_MARGIN_S) * 1e9)
+        return diff_trees(self.base_dir, self.tree, self.ignore, racy_after_ns=racy_after_ns)
 
     def diff(self, paths: list[str] | None = None) -> str:
         """Unified diff of the agent's tree against its snapshot."""
@@ -139,6 +148,7 @@ class Workspace:
             "name": self.name,
             "method": self.method,
             "created_at": self.created_at,
+            "snapshot_at": self.snapshot_at,
             "attempts": self.attempts,
             "merges": self.merges,
             "needs_approval": self.needs_approval,
@@ -155,6 +165,7 @@ class Workspace:
             dir=wdir,
             method=meta["method"],
             created_at=meta["created_at"],
+            snapshot_at=meta.get("snapshot_at", meta["created_at"]),
             attempts=meta.get("attempts", 0),
             merges=meta.get("merges", []),
             needs_approval=meta.get("needs_approval", []),
@@ -211,12 +222,14 @@ class Store:
             # Under the lock, so we never snapshot a repo that is half-way
             # through a merge.
             with self.lock():
+                started = time.time()
                 used = self._snapshot_into(wdir, method)
             ws = Workspace(
                 name=name,
                 dir=wdir,
                 method=used,
-                created_at=time.time(),
+                created_at=started,
+                snapshot_at=started,
                 ignore=self.config.ignore,
             )
             ws.save()
@@ -312,6 +325,7 @@ class Store:
             keep.parent.mkdir(exist_ok=True)
             ws.tree.rename(keep)
             shutil.rmtree(ws.base_dir)
+            ws.snapshot_at = time.time()
             ws.method = self._snapshot_into(ws.dir, ws.method)
             ws.reads.clear()
             if needs_approval:
