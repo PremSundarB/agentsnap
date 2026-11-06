@@ -39,7 +39,7 @@ On our test repo (109 MiB, 5,000 files, 10 agents):
 
 | | agentsnap | git worktree + copying the build cache |
 |---|---|---|
-| time per agent | 54 ms | 716 ms |
+| time per agent | 54 ms | 634 ms |
 | disk for 10 agents | 22 MiB | 1.1 GiB |
 
 ## 2. Know who touched what, before merging

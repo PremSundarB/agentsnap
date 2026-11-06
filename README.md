@@ -171,7 +171,7 @@ including a larger repo, are in [docs/benchmarks.md](docs/benchmarks.md).
 
 | | agentsnap (APFS clone) | agentsnap (plain copy) | git worktree + build cache |
 |---|---|---|---|
-| time to a ready workspace (median) | **54 ms** | 1,016 ms | 716 ms |
+| time to a ready workspace (median) | **54 ms** | 1,123 ms | 634 ms |
 | extra disk for 10 agents | **22 MiB** (2% of 10 copies) | 1.3 GiB | 1.1 GiB |
 
 How this compares with the proposal's success metrics:
@@ -179,7 +179,7 @@ How this compares with the proposal's success metrics:
 | metric (from the proposal) | target | status |
 |---|---|---|
 | Isolation | 10 agents, 0 overwrites | ✅ tested (`tests/test_isolation.py`) |
-| Latency | workspace ready in < 100 ms | ✅ 54 ms on the default repo (APFS), 99 ms (XFS reflink, Linux VM). ⚠️ 142 ms on a 13k-file repo (cost grows with file count) |
+| Latency | workspace ready in < 100 ms | ✅ 54 ms on the default repo (APFS), 99 ms (XFS reflink, Linux VM). ⚠️ 146 ms on a 13k-file repo (cost grows with file count) |
 | Storage | ≥ 90% less than 10 full copies | ✅ 98% less on APFS, 96% less on XFS with reflinks. ⚠️ No savings on ext4/overlayfs (no CoW) |
 | Conflict detection | 100% of overlapping edits caught; 0 merged without approval | ✅ tested, including 10 processes racing to merge |
 | Integration | one `pip install`; works end to end from Claude Code via MCP | ✅ MCP server tested over stdio. ⬜ PyPI release pending |

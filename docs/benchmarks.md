@@ -25,22 +25,25 @@ python benchmarks/bench_workspaces.py --src-files 5000 --cache-files 8000 --skip
 
 ## macOS 26.3, Apple M4, APFS (November 5, 2026)
 
+Includes giving each workspace its private git repo. The synthetic repo's
+objects are packed (`git gc`), as in any cloned repo.
+
 ### Default repo: 2,000 source files + 3,000 cache files, 109 MiB
 
 | approach | median | p95 | disk for 10 agents | % of 10 full copies |
 |---|---|---|---|---|
-| **agentsnap (APFS clone)** | **54 ms** | 77 ms | **22 MiB** | **2%** |
-| agentsnap (plain copy) | 1,016 ms | 1,049 ms | 1,287 MiB | 118% |
-| git worktree + cache | 716 ms | 861 ms | 1,120 MiB | 102% |
-| *git worktree, checkout only* | *296 ms* | *414 ms* | | |
+| **agentsnap (APFS clone)** | **54 ms** | 81 ms | **22 MiB** | **2%** |
+| agentsnap (plain copy) | 1,123 ms | 1,187 ms | 1,290 MiB | 118% |
+| git worktree + cache | 634 ms | 701 ms | 1,122 MiB | 103% |
+| *git worktree, checkout only* | *198 ms* | *256 ms* | | |
 
 ### Larger repo: 5,000 source files + 8,000 cache files, 289 MiB
 
 | approach | median | p95 | disk for 10 agents | % of 10 full copies |
 |---|---|---|---|---|
-| **agentsnap (APFS clone)** | **142 ms** | 154 ms | **56 MiB** | **2%** |
-| git worktree + cache | 1,934 ms | 2,014 ms | 2,952 MiB | 102% |
-| *git worktree, checkout only* | *743 ms* | *825 ms* | | |
+| **agentsnap (APFS clone)** | **146 ms** | 292 ms | **55 MiB** | **2%** |
+| git worktree + cache | 2,285 ms | 2,367 ms | 2,947 MiB | 102% |
+| *git worktree, checkout only* | *506 ms* | *580 ms* | | |
 
 ## Linux (Debian 13, Python 3.11, Docker Desktop VM on the same Mac)
 
@@ -80,13 +83,13 @@ not save disk. Overlayfs-based snapshots (on the roadmap) would fix that.
   there it costs full copies.
 - **Latency target (< 100 ms) met for the default repo; not yet for 13k files.**
   Cloning cost grows with the *number of files*, not their size. The larger
-  repo takes 142 ms. Parallel `clonefile` calls did not help in our tests
+  repo takes 146 ms. Parallel `clonefile` calls did not help in our tests
   (APFS serialises them). Ideas to get under 100 ms: create `base/` lazily
   after the agent starts (MCP server only), or pre-warm a pool of spare
   workspaces.
-- Against `git worktree`, agentsnap is **13×** faster on the default repo and
-  **14×** on the larger one, once the build cache is included, and is still
-  faster than a bare checkout.
+- Against `git worktree`, agentsnap is about **12×** faster on the default repo
+  and **16×** on the larger one once the build cache is included, and it is
+  still faster than a bare checkout.
 - The plain-copy fallback is slower than a worktree, because it copies the
   build cache too, but agents then need no install or build step. It also
   stores `base/` (tracked files only), hence 118%.
@@ -96,4 +99,6 @@ not save disk. Overlayfs-based snapshots (on the roadmap) would fix that.
 - *v0.1 development*: hashing every file at creation took about 900 ms on the
   larger repo. Switching to git-style `lstat` signatures brought it to about
   210 ms. Skipping ignored directories (such as `node_modules`) in the pristine
-  `base/` copy brought it to 142 ms.
+  `base/` copy brought it to 142 ms. Adding a private git repo per workspace
+  costs little when objects are packed (146 ms). With 5,000 *loose* objects it
+  rose to about 190 ms.
