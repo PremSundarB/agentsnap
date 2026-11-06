@@ -25,13 +25,14 @@ import difflib
 import json
 import re
 import shutil
+import subprocess
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import journal
-from .snapshot import create_snapshot
+from .snapshot import clone_path, create_snapshot
 from .tracking import DEFAULT_IGNORES, ChangeSet, ReadLog, diff_trees
 
 try:  # POSIX only; Windows is not supported yet.
@@ -58,7 +59,8 @@ class Config:
       "extra_ignore": ["generated"],      # more names never tracked or merged
       "snapshot_method": "copy",          # force a snapshot method
       "merge_check": "pytest -q",         # must pass before any merge lands
-      "merge_check_timeout": 600          # seconds
+      "merge_check_timeout": 600,         # seconds
+      "workspace_git": "private"          # or "none": block git in workspaces
     }
     """
 
@@ -66,6 +68,7 @@ class Config:
     snapshot_method: str | None = None
     merge_check: str | None = None
     merge_check_timeout: float | None = None
+    workspace_git: str = "private"
 
     @classmethod
     def load(cls, path: Path) -> Config:
@@ -77,6 +80,7 @@ class Config:
             snapshot_method=data.get("snapshot_method"),
             merge_check=data.get("merge_check"),
             merge_check_timeout=data.get("merge_check_timeout"),
+            workspace_git=data.get("workspace_git", "private"),
         )
 
 
@@ -230,7 +234,49 @@ class Store:
         # often the bulk of the files, and the bulk of the cloning time.
         used = create_snapshot(self.repo, wdir / "tree", exclude=SNAPSHOT_EXCLUDES, method=method)
         create_snapshot(wdir / "tree", wdir / "base", exclude=self.config.ignore, method=used)
+        self._private_git(wdir, used)
         return used
+
+    def _private_git(self, wdir: Path, method: str) -> None:
+        """Give the workspace its own git repository.
+
+        Without this, git commands an agent runs inside its workspace would
+        walk up the directory tree and act on the *main* repo (workspaces live
+        inside it): ``git checkout .`` or ``git reset --hard`` there would
+        destroy the user's uncommitted work.
+
+        * copy-on-write filesystems: clone ``.git`` itself (cheap), giving
+          the agent a complete private repo.
+        * otherwise: ``git clone --shared`` (borrows the main repo's objects,
+          has its own refs and index) plus a mixed reset to fill the index.
+        * if that is impossible or ``workspace_git`` is ``"none"``: a ``.git``
+          file pointing nowhere, so git refuses to run rather than escape.
+
+        ``.git`` is ignored by change tracking, so it is never merged back.
+        """
+        tree, main_git = wdir / "tree", self.repo / ".git"
+        if not (main_git.exists() or main_git.is_symlink()):
+            return  # not a git repo; nothing to escape to
+        if self.config.workspace_git == "private":
+            try:
+                if main_git.is_dir() and not main_git.is_symlink() and method in ("apfs", "reflink"):
+                    clone_path(main_git, tree / ".git", method=method)
+                    return
+                if shutil.which("git"):
+                    gitdir = wdir / "git"
+                    if gitdir.exists():  # left over from before a refresh
+                        shutil.rmtree(gitdir)
+                    _git("clone", "-q", "--shared", "--no-checkout", str(self.repo), str(gitdir))
+                    (tree / ".git").write_text(f"gitdir: {gitdir / '.git'}\n", encoding="utf-8")
+                    _git("-C", str(tree), "reset", "-q")
+                    return
+            except (OSError, subprocess.CalledProcessError):
+                for leftover in (tree / ".git", wdir / "git"):
+                    if leftover.is_dir() and not leftover.is_symlink():
+                        shutil.rmtree(leftover)
+                    elif leftover.exists() or leftover.is_symlink():
+                        leftover.unlink()
+        (tree / ".git").write_text(f"gitdir: {_NO_GIT}\n", encoding="utf-8")
 
     def get(self, name: str) -> Workspace:
         _check_name(name)
@@ -312,6 +358,13 @@ class Store:
             finally:
                 if fcntl is not None:
                     fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+_NO_GIT = ".agentsnap-git-disabled-in-workspaces"
+
+
+def _git(*args: str) -> None:
+    subprocess.run(["git", *args], check=True, capture_output=True)
 
 
 def _text_lines(p: Path) -> list[str] | None:

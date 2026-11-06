@@ -36,6 +36,8 @@ several agents can work in parallel without overwriting each other.
 
 Before editing code, call create_workspace with a short task name and do ALL of
 your reads and edits inside the returned directory, never in the main repo.
+Git works inside the workspace but is private to it: your commits there are
+not merged. agentsnap merges the files you changed.
 When done, call check_conflicts and then merge_workspace. If a merge reports
 conflicts, do not force it: either retry with policy "merge3", or use policy
 "rerun" to get a fresh snapshot with the other agents' changes and redo the

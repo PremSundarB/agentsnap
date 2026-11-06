@@ -82,10 +82,31 @@ output is removed and the next method is tried. A method that failed on a
 device is not retried there for the rest of the process. The destination is checked
 up front, so cleanup can never delete something that existed before.
 
-`.git` and `.agentsnap` are not snapshotted. Everything else is, *including*
-build caches such as `node_modules`. That is how agents avoid reinstalling
+`.agentsnap` is never snapshotted. Everything else is, *including* build
+caches such as `node_modules`. That is how agents avoid reinstalling
 dependencies. Those caches are, however, excluded from change tracking and are
 never merged back (`DEFAULT_IGNORES`).
+
+## Git inside a workspace
+
+Agents run git all the time (`git status`, `git diff`, sometimes `git
+checkout .`). Because workspaces live *inside* the repo, a workspace without its
+own `.git` would make git walk up and operate on the **main** repo. An agent
+running `git checkout .` or `git reset --hard` "in its workspace" would wipe the
+user's uncommitted work. We reproduced this before fixing it.
+
+So every workspace gets a private git repository (`Store._private_git`):
+
+| situation | what the workspace gets |
+|---|---|
+| CoW filesystem, normal `.git` dir | a clone of `.git` (cheap): a complete private repo, index included |
+| no CoW, or `.git` is a file (worktree/submodule) | `git clone --shared` into `<workspace>/git` (borrows objects via alternates, own refs and index) plus a mixed `git reset` |
+| setup fails, or `"workspace_git": "none"` | a `.git` *file* pointing nowhere, so git fails instead of escaping |
+
+The agent can use git normally, including committing. Its commits stay in the
+workspace: `.git` is ignored by change tracking and never merged. What
+agentsnap merges is the *files*. `merge --commit` can record them in the main
+repo.
 
 ## Tracking changes (writes)
 

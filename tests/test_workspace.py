@@ -16,12 +16,12 @@ def test_create_workspace(store, repo):
     assert read(repo, ".agentsnap/.gitignore").strip().endswith("*")
 
 
-def test_snapshot_excludes_git_and_state(git_repo):
+def test_snapshot_excludes_state_dir(git_repo):
     store = Store(git_repo)
     store.create("a")
     ws = store.create("b")
-    assert not (ws.tree / ".git").exists()
     assert not (ws.tree / ".agentsnap").exists()
+    assert not (ws.base_dir / ".git").exists()  # base/ never needs git
 
 
 def test_build_cache_dirs_are_cloned_but_not_tracked(store):

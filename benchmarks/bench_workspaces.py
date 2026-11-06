@@ -76,6 +76,10 @@ def make_repo(root: Path, src_files: int, src_kb: int, cache_files: int, cache_k
     subprocess.run([*git, "init", "-q"], check=True)
     subprocess.run([*git, "add", "-A"], check=True)
     subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)
+    # Pack objects, as in any cloned or gc'd repo. Otherwise .git holds one
+    # loose file per object, which inflates the cost of giving each workspace
+    # its private copy of .git.
+    subprocess.run([*git, "gc", "-q"], check=True)
     return total
 
 

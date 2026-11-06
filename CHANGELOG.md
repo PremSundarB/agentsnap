@@ -26,6 +26,10 @@ First version.
   merged result in a scratch snapshot and refuses the merge if it fails.
 - Refuses to merge through symlinked parent directories that point outside
   the repo.
+- Private git per workspace: git commands run inside a workspace act on a
+  private repo (a CoW clone of `.git`, or a `--shared` clone), never on the
+  main repo, so `git checkout .` in a workspace cannot destroy uncommitted
+  work in the main repo.
 - Undo journal: a merge that fails or crashes half-way is rolled back (on
   the spot, or by the next process that takes the lock). Type changes
   (directory ↔ file) are checked before anything is written.

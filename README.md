@@ -56,7 +56,9 @@ applies the database answer, optimistic concurrency control, to agent workspaces
    `.agentsnap/workspaces/NAME/tree`. On macOS this uses APFS `clonefile`, on
    Linux reflinks (CoW on btrfs/XFS), and a plain copy anywhere else.
    Build caches like `node_modules` come along for free, so agents don't
-   reinstall or rebuild.
+   reinstall or rebuild. Each workspace also gets its **own private git repo**,
+   so an agent running `git checkout .` or `git reset --hard` in its workspace
+   cannot touch your main repo.
 2. **Conflict detection.** agentsnap compares each workspace with a pristine
    copy of its starting point, the same way git's index works: cheap `stat`
    checks first, content hashes only for files that look changed. It reports
@@ -203,12 +205,15 @@ Optional, in `<repo>/.agentsnap/config.json`:
   "extra_ignore": ["generated", "coverage"],
   "merge_check": "pytest -q -x",
   "merge_check_timeout": 600,
-  "snapshot_method": "copy"
+  "snapshot_method": "copy",
+  "workspace_git": "private"
 }
 ```
 
 `merge_check` applies to every merge, from the CLI and from agents over MCP.
 Agents cannot skip it or approve their own conflict resolutions.
+`workspace_git: "none"` disables git inside workspaces entirely instead of
+giving each one a private repo.
 
 ## Project layout
 

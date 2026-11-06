@@ -41,6 +41,13 @@ them, reports conflicts and merges:
 ./parallel_tasks.sh "typos:Fix spelling in docs/" "tests:Add tests for src/util.py"
 ```
 
+## Git inside workspaces
+
+Each workspace has its own private git repository, so the agent can run
+`git status`, `git diff` and even `git commit` there without affecting your
+repo. Those commits are not merged. agentsnap merges the agent's *files*, and
+`merge --commit` records them in your repo's history.
+
 ## Tracking reads with a hook
 
 Conflicts on *writes* are found automatically. To also get warnings when an
