@@ -54,26 +54,27 @@ comparison between rows is what matters.
 
 | approach | median | p95 | disk for 10 agents | % of 10 full copies |
 |---|---|---|---|---|
-| **agentsnap (reflink)** | **99 ms** | 128 ms | **42 MiB** | **4%** |
-| agentsnap (plain copy) | 194 ms | 338 ms | 1.2 GiB | 118% |
-| git worktree + cache | 182 ms | 283 ms | 1.1 GiB | 103% |
-| *git worktree, checkout only* | *93 ms* | | | |
+| **agentsnap (reflink)** | **106 ms** | 130 ms | **42 MiB** | **4%** |
+| git worktree + cache | 174 ms | 245 ms | 1.1 GiB | 103% |
+
+An earlier run, before workspaces got a private git repo, measured 99 ms. Run
+to run, the VM varies by about ±10 ms.
 
 ### overlayfs (Docker's default; no CoW): default repo
 
 `agentsnap doctor` reports `reflink` as unavailable here, so agentsnap uses
-`cp -a`.
+`cp -a`, and the private git repo is a `git clone --shared`.
 
 | approach | median | p95 | disk for 10 agents | % of 10 full copies |
 |---|---|---|---|---|
-| agentsnap (`cp -a`) | 142 ms | 186 ms | 1.2 GiB | 115% |
-| agentsnap (Python copy) | 196 ms | 230 ms | 1.2 GiB | 115% |
-| git worktree + cache | 175 ms | 223 ms | 1.1 GiB | 101% |
-| *git worktree, checkout only* | *95 ms* | | | |
+| agentsnap (`cp -a`) | 189 ms | 333 ms | 1.2 GiB | 115% |
+| agentsnap (Python copy) | 235 ms | 273 ms | 1.2 GiB | 115% |
+| git worktree + cache | 186 ms | 229 ms | 1.1 GiB | 101% |
+| *git worktree, checkout only* | *90 ms* | | | |
 
 On filesystems without CoW, agentsnap still gives isolation and conflict
-safety, and is about as fast as a worktree with its dependencies, but it does
-not save disk. Overlayfs-based snapshots (on the roadmap) would fix that.
+safety at about the speed of a worktree with its dependencies, but it does not
+save disk. Overlayfs-based snapshots (on the roadmap) would fix that.
 
 ## What the numbers say
 
