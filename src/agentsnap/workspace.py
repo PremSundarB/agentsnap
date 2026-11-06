@@ -30,6 +30,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import journal
 from .snapshot import create_snapshot
 from .tracking import DEFAULT_IGNORES, ChangeSet, ReadLog, diff_trees
 
@@ -203,7 +204,10 @@ class Store:
             raise WorkspaceError(f"workspace {name!r} already exists")
         wdir.mkdir()
         try:
-            used = self._snapshot_into(wdir, method)
+            # Under the lock, so we never snapshot a repo that is half-way
+            # through a merge.
+            with self.lock():
+                used = self._snapshot_into(wdir, method)
             ws = Workspace(
                 name=name,
                 dir=wdir,
@@ -286,14 +290,24 @@ class Store:
 
     # -- concurrency ---------------------------------------------------
 
+    @property
+    def txn_dir(self) -> Path:
+        return self.root / "txn"
+
     @contextlib.contextmanager
     def lock(self) -> Iterator[None]:
-        """Exclusive, cross-process lock serialising merges and refreshes."""
+        """Exclusive, cross-process lock serialising snapshots and merges.
+
+        Not re-entrant. On entry, rolls back any merge that crashed half-way,
+        so the repo is always seen in a consistent state.
+        """
         self.init()
         with open(self.root / "lock", "w") as fh:
             if fcntl is not None:
                 fcntl.flock(fh, fcntl.LOCK_EX)
             try:
+                if self.txn_dir.exists():
+                    journal.rollback(self.txn_dir, self.repo)
                 yield
             finally:
                 if fcntl is not None:

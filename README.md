@@ -63,7 +63,8 @@ applies the database answer, optimistic concurrency control, to agent workspaces
    files changed by several agents (and, for Python, *which functions* each one
    touched), files the repo changed underneath an agent, and files an agent
    *read* that have since changed.
-3. **Merge.** A workspace merges all-or-nothing under a lock. Clean changes are
+3. **Merge.** A workspace merges all-or-nothing under a lock, with an undo
+   journal so even a crash half-way leaves the repo unchanged. Clean changes are
    applied. If someone else merged a change to the same file first, the policy
    decides: stop for a person (`human`, the default), try a line-level
    three-way merge (`merge3`), re-snapshot so the agent can redo its task on the
@@ -214,6 +215,7 @@ Agents cannot skip it or approve their own conflict resolutions.
 src/agentsnap/
   snapshot.py    copy-on-write snapshots (APFS / reflink / copy)     Bhushan
   merge.py       all-or-nothing merges and policies                  Bhushan
+  journal.py     undo journal: roll back failed or crashed merges    Bhushan
   tracking.py    what changed (stat + hash) and what was read        Arvind
   conflicts.py   write-write, stale-write, stale-read, read-write    Arvind
   symbols.py     which Python functions an edit touched              Arvind

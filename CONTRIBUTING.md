@@ -33,7 +33,7 @@ CI runs the same checks on Linux and macOS with Python 3.10 and 3.13.
 | area | module | owner |
 |---|---|---|
 | snapshots | `src/agentsnap/snapshot.py` | Bhushan |
-| merge engine | `src/agentsnap/merge.py` | Bhushan |
+| merge engine | `src/agentsnap/merge.py`, `journal.py` | Bhushan |
 | read/write tracking | `src/agentsnap/tracking.py` | Arvind |
 | conflict detection | `src/agentsnap/conflicts.py`, `symbols.py` | Arvind |
 | CLI | `src/agentsnap/cli.py` | Prem |

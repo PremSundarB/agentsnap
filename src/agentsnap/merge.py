@@ -48,6 +48,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import journal
 from .conflicts import Conflict, find_stale_reads, is_stale
 from .snapshot import create_snapshot
 from .tracking import same_content
@@ -150,6 +151,10 @@ def merge_workspace(
                 plan.append(_Write(path, "merged", merged))
             else:
                 result.conflicts.append(Conflict(path=path, kind="stale-write", workspaces=(name,)))
+        if not result.conflicts:
+            result.conflicts = [
+                Conflict(path=p, kind="type-change", workspaces=(name,)) for p in _blocked(store.repo, plan)
+            ]
 
         if not result.conflicts and plan and ws.needs_approval and not approve:
             result.awaiting_approval = list(ws.needs_approval)
@@ -161,8 +166,18 @@ def merge_workspace(
         elif dry_run:
             result.applied = {w.path: w.how for w in plan}
         else:
-            for w in plan:
-                _apply(store, ws, w)
+            ordered = _ordered(plan)
+            writes = [w for w in ordered if w.how != "convergent"]
+            # Phase 1: the repo, all-or-nothing via the undo journal.
+            journal.run(
+                store.txn_dir,
+                store.repo,
+                [w.path for w in writes],
+                lambda: [_write_into(store.repo, ws, w) for w in writes],
+            )
+            # Phase 2: the workspace's own bookkeeping (base/, merged files in tree/).
+            for w in ordered:
+                _sync_workspace(store, ws, w)
                 result.applied[w.path] = w.how
             ws.merges.append(
                 {
@@ -193,7 +208,7 @@ def _run_check(store: Store, ws: Workspace, plan: list[_Write], command: str, ti
     scratch.parent.mkdir(parents=True, exist_ok=True)
     try:
         create_snapshot(store.repo, scratch, exclude=SNAPSHOT_EXCLUDES, method=ws.method)
-        for w in plan:
+        for w in _ordered(plan):
             _write_into(scratch, ws, w)
         env = {**os.environ, "AGENTSNAP_CHECK": "1", "AGENTSNAP_WORKSPACE": ws.name}
         try:
@@ -214,6 +229,44 @@ def _run_check(store: Store, ws: Workspace, plan: list[_Write], command: str, ti
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     return {"command": command, "returncode": code, "output": output[-CHECK_OUTPUT_LIMIT:]}
+
+
+def _ordered(plan: list[_Write]) -> list[_Write]:
+    """Deletions first, so a directory emptied by the merge can become a file."""
+    return [w for w in plan if w.how == "deleted"] + [w for w in plan if w.how != "deleted"]
+
+
+def _blocked(repo: Path, plan: list[_Write]) -> list[str]:
+    """Paths the filesystem would refuse to write, even after the plan's deletions.
+
+    * the target is a directory that still has files the merge does not delete;
+    * a parent of the target is a file (or link) that the merge does not delete.
+    """
+    deleted = {w.path for w in plan if w.how == "deleted"}
+    blocked = []
+    for w in plan:
+        if w.how in ("deleted", "convergent"):
+            continue
+        target = repo / w.path
+        if target.is_dir() and not target.is_symlink():
+            for dirpath, dirnames, filenames in os.walk(target):
+                leftovers = [
+                    n
+                    for n in filenames + [d for d in dirnames if (Path(dirpath) / d).is_symlink()]
+                    if (Path(dirpath) / n).relative_to(repo).as_posix() not in deleted
+                ]
+                if leftovers:
+                    blocked.append(w.path)
+                    break
+            continue
+        parent = Path(w.path).parent
+        while parent.parts:
+            p = repo / parent
+            if (p.is_symlink() or p.exists()) and not p.is_dir() and parent.as_posix() not in deleted:
+                blocked.append(w.path)
+                break
+            parent = parent.parent
+    return blocked
 
 
 def _inside_repo(repo: Path, path: str) -> bool:
@@ -266,13 +319,15 @@ def _write_into(root: Path, ws: Workspace, w: _Write) -> None:
     elif w.how == "merged":
         _atomic_write(target, w.data or b"", mode_from=source)
     elif w.how != "convergent":
+        if target.is_dir() and not target.is_symlink():
+            target.rmdir()  # emptied by this merge's deletions (checked by _blocked)
         _atomic_copy(source, target)
 
 
-def _apply(store: Store, ws: Workspace, w: _Write) -> None:
+def _sync_workspace(store: Store, ws: Workspace, w: _Write) -> None:
+    """After the repo is written: make the workspace's base/ match the repo for ``w``."""
     repo_p, tree_p, base_p = store.repo / w.path, ws.tree / w.path, ws.base_dir / w.path
 
-    _write_into(store.repo, ws, w)
     if w.how == "merged":
         _atomic_write(tree_p, w.data or b"", mode_from=tree_p)  # agent sees merged result
 
@@ -280,7 +335,9 @@ def _apply(store: Store, ws: Workspace, w: _Write) -> None:
     # is not merged twice and later merges compare against the new version.
     # copy2 keeps the mtime, so base/ and repo signatures match afterwards.
     _remove(base_p)
-    if repo_p.exists() or repo_p.is_symlink():
+    if base_p.is_dir():  # a directory became a file: clear what is left of it
+        shutil.rmtree(base_p)
+    if repo_p.is_symlink() or repo_p.is_file():
         _atomic_copy(repo_p, base_p)
     _prune_empty_dirs(base_p.parent, ws.base_dir)
 

@@ -134,17 +134,22 @@ def cmd_conflicts(store: Store, args) -> int:
 def cmd_merge(store: Store, args) -> int:
     rc = EXIT_OK
     for name in args.names:
-        res = merge_workspace(
-            store,
-            name,
-            policy=args.policy,
-            dry_run=args.dry_run,
-            commit=args.commit,
-            message=args.message,
-            approve=args.approve,
-            check=args.check,
-            check_timeout=args.check_timeout,
-        )
+        try:
+            res = merge_workspace(
+                store,
+                name,
+                policy=args.policy,
+                dry_run=args.dry_run,
+                commit=args.commit,
+                message=args.message,
+                approve=args.approve,
+                check=args.check,
+                check_timeout=args.check_timeout,
+            )
+        except OSError as exc:
+            print(f"{name}: merge failed and was rolled back, repo unchanged: {exc}", file=sys.stderr)
+            rc = EXIT_CONFLICT
+            continue
         if args.json:
             _print_json(res.to_dict())
         else:

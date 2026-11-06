@@ -82,7 +82,7 @@ def file_sig(path: Path) -> Sig | None:
     """Cheap signature from ``lstat``, or None if not a file/symlink."""
     try:
         st = os.lstat(path)
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):  # missing, or a parent is a file
         return None
     if stat.S_ISLNK(st.st_mode):
         return ("l", st.st_size, st.st_mtime_ns)

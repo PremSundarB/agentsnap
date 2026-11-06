@@ -163,13 +163,30 @@ Tree-sitter would extend this to other languages.
    - **convergent**: repo already equals tree. Nothing to write.
    - **clean**: repo still equals base. Copy tree to repo.
    - **stale**: apply the policy (below).
-3. If any path is unresolved, write **nothing** (all-or-nothing) and report.
-4. Otherwise write every file atomically (temp file + `rename`), remove deleted
-   files and prune emptied directories. Then update `base/` to the merged
-   version so the same change is never merged twice and later merges compare
-   against the right base.
-5. Optionally `git commit` exactly the merged paths (`--commit`). Unrelated
-   staged or unstaged work in the repo is left alone.
+3. Check the plan against the filesystem: a file cannot replace a directory
+   that still holds other files, and a path cannot be written under something
+   that is now a file. Such paths are `type-change` conflicts.
+4. If any path is unresolved, write **nothing** (all-or-nothing) and report.
+5. Otherwise write the repo inside an **undo journal** (below): deletions
+   first, so a directory the merge empties can become a file, then every
+   write (temp file + `rename`), pruning emptied directories.
+6. Update the workspace's `base/` to the merged version, so the same change is
+   never merged twice and later merges compare against the right base.
+7. Optionally `git commit` exactly the merged paths (`--commit`). Unrelated
+   staged or unstaged work in the repo is left alone. A commit failure is
+   reported, never raised, because the merge has already happened.
+
+**Undo journal (crash safety).** Writing many files is not atomic, and a disk
+can fill up or a process can be killed half-way. `journal.py` first copies
+every repo file the merge will overwrite or delete into `.agentsnap/txn/backup/`,
+then writes `txn/journal.json` listing the paths in apply order. Once that file
+exists, the merge counts as in progress. If applying raises, the journal is
+replayed backwards immediately. If the process dies, the next process to take
+the lock (any merge, refresh *or* workspace creation) finds the journal and
+rolls back first. A crash *before* the journal is written leaves only backups,
+which are discarded. This is an undo log in the database sense, so the repo is
+always either fully before or fully after a merge. Workspace creation takes the
+same lock, so a snapshot never captures a half-merged repo.
 
 **Policies for stale paths**
 
