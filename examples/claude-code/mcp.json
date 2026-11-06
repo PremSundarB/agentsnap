@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agentsnap": {
+      "command": "agentsnap-mcp",
+      "args": ["--repo", "."]
+    }
+  }
+}
