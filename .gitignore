@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# agentsnap state (when dogfooding on this repo)
+.agentsnap/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Office lock files
+~$*

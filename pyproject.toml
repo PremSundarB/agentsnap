@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentsnap"
+dynamic = ["version"]
+description = "Run many coding agents on one repo: copy-on-write workspaces, conflict detection and safe merges."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Bhushan" }, { name = "Arvind" }, { name = "Prem" }]
+keywords = ["agents", "llm", "coding-agents", "mcp", "copy-on-write", "git", "worktree"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Version Control",
+]
+dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.2"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+agentsnap = "agentsnap.cli:main"
+agentsnap-mcp = "agentsnap.mcp_server:main"
+
+[tool.hatch.version]
+path = "src/agentsnap/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentsnap"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["docs/proposal", ".github"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["SIM105"]
