@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .symbols import changed_symbols, is_python
-from .tracking import ChangeSet, same_content
+from .tracking import DEFAULT_IGNORES, ChangeSet, is_ignored, same_content
 
 ERROR = "error"
 WARNING = "warning"
@@ -70,6 +70,8 @@ class Conflict:
             msg = f"{self.path}: changed in the repo since {who} snapshotted it, and {who} changed it too"
         elif self.kind == "stale-read":
             msg = f"{self.path}: {who} read it, but the repo version changed since"
+        elif self.kind == "unsafe-path":
+            msg = f"{self.path}: a parent directory in the repo is a symlink pointing outside it"
         elif self.kind == "read-write":
             reader, *writers = self.workspaces
             msg = f"{self.path}: {reader} read it while {', '.join(writers)} changed it"
@@ -131,13 +133,21 @@ def find_stale_writes(
 
 
 def find_stale_reads(
-    repo: Path, ws_name: str, base_dir: Path, reads: Iterable[str], changes: ChangeSet
+    repo: Path,
+    ws_name: str,
+    base_dir: Path,
+    reads: Iterable[str],
+    changes: ChangeSet,
+    ignore: Iterable[str] = DEFAULT_IGNORES,
 ) -> list[Conflict]:
-    """Files the workspace read (but did not change) that have since changed in the repo."""
+    """Files the workspace read (but did not change) that have since changed in the repo.
+
+    Reads of ignored paths (dependencies, caches) are not tracked.
+    """
     return [
         Conflict(path=p, kind="stale-read", workspaces=(ws_name,), severity=WARNING)
         for p in sorted(set(reads) - changes.paths)
-        if not same_content(Path(repo) / p, Path(base_dir) / p)
+        if not is_ignored(p, ignore) and not same_content(Path(repo) / p, Path(base_dir) / p)
     ]
 
 
@@ -226,6 +236,6 @@ def check(store, names: Iterable[str] | None = None) -> Report:
         conflicts += find_stale_writes(store.repo, ws.name, ws.base_dir, changes[ws.name], ws.tree)
         r = ws.reads.paths()
         reads[ws.name] = r
-        conflicts += find_stale_reads(store.repo, ws.name, ws.base_dir, r, changes[ws.name])
+        conflicts += find_stale_reads(store.repo, ws.name, ws.base_dir, r, changes[ws.name], ws.ignore)
     conflicts += find_read_write(reads, changes)
     return Report(conflicts=conflicts, changes=changes)

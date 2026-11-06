@@ -103,6 +103,12 @@ def same_content(a: Path, b: Path) -> bool:
     return hash_file(a) == hash_file(b)
 
 
+def is_ignored(path: str, ignore: Iterable[str] = DEFAULT_IGNORES) -> bool:
+    """True if any component of the relative POSIX ``path`` is an ignored name."""
+    ignored = frozenset(ignore)
+    return any(part in ignored for part in path.split("/"))
+
+
 def build_manifest(root: Path, ignore: Iterable[str] = DEFAULT_IGNORES) -> Manifest:
     """Map every file under ``root`` (POSIX-style relative path) to its signature."""
     root = Path(root)

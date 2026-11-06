@@ -45,3 +45,18 @@ step "cat src/app.py"
 cat "$DEMO/src/app.py"
 as conflicts
 as drop docs greeter closer
+
+step "# scene 2: two edits with no file overlap that still break each other"
+as new renamer caller
+RENAMER=$("$AGENTSNAP" -C "$DEMO" path renamer)
+CALLER=$("$AGENTSNAP" -C "$DEMO" path caller)
+sed -i.bak 's/def greet/def say_hi/' "$RENAMER/src/app.py" && rm "$RENAMER/src/app.py.bak"
+printf 'from app import greet\n\nprint(greet("world"))\n' > "$CALLER/src/main.py"
+CHECK="cd src && python3 -c 'import app; import os; os.path.exists(\"main.py\") and __import__(\"main\")'"
+as conflicts
+as merge renamer --check "$CHECK"
+as merge caller --check "$CHECK"
+step "# the caller's change was refused: the repo still works"
+step "cat src/main.py"
+cat "$DEMO/src/main.py" 2>/dev/null || echo "(not merged)"
+as drop -f renamer caller

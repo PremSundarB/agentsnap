@@ -8,9 +8,14 @@ the cheapest method the platform supports and fall back if it fails:
 1. ``apfs``    - macOS clonefile(2). Near-instant, and data blocks are shared
                  until one side writes to them, so a snapshot costs almost no
                  disk space.
-2. ``reflink`` - Linux ``cp --reflink=auto``. Copy-on-write on btrfs/XFS; GNU
-                 cp silently falls back to a normal copy on other filesystems.
-3. ``copy``    - Portable ``shutil`` copy. Always works, costs full disk space.
+2. ``reflink`` - Linux ``cp -a --reflink=always``. Copy-on-write on btrfs, XFS
+                 and other reflink-capable filesystems; fails elsewhere (ext4,
+                 overlayfs), and we move on.
+3. ``cp``      - Linux ``cp -a``. A full copy, but faster than Python's.
+4. ``copy``    - Portable ``shutil`` copy. Always works, costs full disk space.
+
+A method that fails on a device is remembered for the life of the process,
+so later snapshots on the same filesystem skip straight to one that works.
 
 Set ``AGENTSNAP_SNAPSHOT_METHOD`` to force one method (handy in tests and
 benchmarks).
@@ -61,15 +66,19 @@ def _clone_apfs(src: Path, dst: Path) -> None:
         raise OSError(err, os.strerror(err), str(src))
 
 
-def _clone_reflink(src: Path, dst: Path) -> None:
+def _run_cp(*args: str) -> None:
     try:
-        subprocess.run(
-            ["cp", "-a", "--reflink=auto", str(src), str(dst)],
-            check=True,
-            capture_output=True,
-        )
+        subprocess.run(["cp", *args], check=True, capture_output=True)
     except subprocess.CalledProcessError as exc:
         raise OSError(exc.stderr.decode(errors="replace").strip()) from exc
+
+
+def _clone_reflink(src: Path, dst: Path) -> None:
+    _run_cp("-a", "--reflink=always", str(src), str(dst))
+
+
+def _clone_cp(src: Path, dst: Path) -> None:
+    _run_cp("-a", str(src), str(dst))
 
 
 def _copy(src: Path, dst: Path) -> None:
@@ -84,6 +93,7 @@ def _copy(src: Path, dst: Path) -> None:
 _CLONERS: dict[str, Callable[[Path, Path], None]] = {
     "apfs": _clone_apfs,
     "reflink": _clone_reflink,
+    "cp": _clone_cp,
     "copy": _copy,
 }
 
@@ -94,9 +104,29 @@ def available_methods() -> list[str]:
     if _clonefile is not None:
         methods.append("apfs")
     if sys.platform.startswith("linux") and shutil.which("cp"):
-        methods.append("reflink")
+        methods += ["reflink", "cp"]
     methods.append("copy")
     return methods
+
+
+def probe_methods(directory: Path) -> list[str]:
+    """Methods that actually work for snapshots inside ``directory``, cheapest first.
+
+    Each available method is tried on a tiny file in a temporary folder there.
+    """
+    import tempfile
+
+    works = []
+    with tempfile.TemporaryDirectory(prefix=".agentsnap-probe-", dir=directory) as tmp:
+        src = Path(tmp) / "probe"
+        src.write_bytes(b"agentsnap probe\n")
+        for i, m in enumerate(available_methods()):
+            try:
+                _CLONERS[m](src, Path(tmp) / f"out{i}")
+                works.append(m)
+            except OSError:
+                pass
+    return works
 
 
 def clone_path(src: Path, dst: Path, method: str | None = None) -> str:
@@ -141,16 +171,33 @@ def _run_methods(action: Callable[[str], None], dst: Path, method: str | None) -
     else:
         candidates = available_methods()
 
+    device = _device_of(dst.parent)
     errors = []
     for m in candidates:
+        if not forced and (m, device) in _failed and m != candidates[-1]:
+            continue
         try:
             action(m)
             return m
         except OSError as exc:
             # e.g. clonefile() on a non-APFS volume. Clean up and try the next one.
             errors.append(f"{m}: {exc}")
+            _failed.add((m, device))
             _remove(dst)
     raise SnapshotError(f"could not snapshot to {dst}: " + "; ".join(errors))
+
+
+# (method, st_dev) pairs that failed earlier in this process.
+_failed: set[tuple[str, int]] = set()
+
+
+def _device_of(path: Path) -> int:
+    for p in (path, *path.parents):
+        try:
+            return os.stat(p).st_dev
+        except FileNotFoundError:
+            continue
+    return -1
 
 
 def _remove(path: Path) -> None:

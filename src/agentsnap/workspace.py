@@ -30,7 +30,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .snapshot import clone_path, create_snapshot
+from .snapshot import create_snapshot
 from .tracking import DEFAULT_IGNORES, ChangeSet, ReadLog, diff_trees
 
 try:  # POSIX only; Windows is not supported yet.
@@ -51,16 +51,32 @@ class WorkspaceError(Exception):
 
 @dataclass
 class Config:
+    """Settings from ``.agentsnap/config.json`` (all optional)::
+
+    {
+      "extra_ignore": ["generated"],      # more names never tracked or merged
+      "snapshot_method": "copy",          # force a snapshot method
+      "merge_check": "pytest -q",         # must pass before any merge lands
+      "merge_check_timeout": 600          # seconds
+    }
+    """
+
     ignore: frozenset[str] = DEFAULT_IGNORES
     snapshot_method: str | None = None
+    merge_check: str | None = None
+    merge_check_timeout: float | None = None
 
     @classmethod
     def load(cls, path: Path) -> Config:
         if not path.exists():
             return cls()
         data = json.loads(path.read_text(encoding="utf-8"))
-        ignore = DEFAULT_IGNORES | frozenset(data.get("extra_ignore", []))
-        return cls(ignore=ignore, snapshot_method=data.get("snapshot_method"))
+        return cls(
+            ignore=DEFAULT_IGNORES | frozenset(data.get("extra_ignore", [])),
+            snapshot_method=data.get("snapshot_method"),
+            merge_check=data.get("merge_check"),
+            merge_check_timeout=data.get("merge_check_timeout"),
+        )
 
 
 @dataclass
@@ -71,6 +87,9 @@ class Workspace:
     created_at: float
     attempts: int = 0
     merges: list[dict] = field(default_factory=list)
+    # Paths that conflicted before a rerun. The agent's new attempt resolves
+    # them, and a person must approve before it merges.
+    needs_approval: list[str] = field(default_factory=list)
     ignore: frozenset[str] = DEFAULT_IGNORES
 
     @property
@@ -117,6 +136,7 @@ class Workspace:
             "created_at": self.created_at,
             "attempts": self.attempts,
             "merges": self.merges,
+            "needs_approval": self.needs_approval,
         }
         tmp = self.dir / "meta.json.tmp"
         tmp.write_text(json.dumps(meta, indent=1, sort_keys=True), encoding="utf-8")
@@ -132,6 +152,7 @@ class Workspace:
             created_at=meta["created_at"],
             attempts=meta.get("attempts", 0),
             merges=meta.get("merges", []),
+            needs_approval=meta.get("needs_approval", []),
             ignore=ignore,
         )
 
@@ -198,10 +219,13 @@ class Store:
 
     def _snapshot_into(self, wdir: Path, method: str | None) -> str:
         method = method or self.config.snapshot_method
-        # Snapshot once into base/, then clone base/ into tree/. Both are
-        # identical by construction even if the repo changes meanwhile.
-        used = create_snapshot(self.repo, wdir / "base", exclude=SNAPSHOT_EXCLUDES, method=method)
-        clone_path(wdir / "base", wdir / "tree", method=used)
+        # Snapshot the repo into tree/, then clone tree/ into base/ before the
+        # agent is told about it, so both are identical by construction even
+        # if the repo changes meanwhile. base/ is only used for tracked files,
+        # so it skips ignored top-level directories (node_modules, .venv, ...):
+        # often the bulk of the files, and the bulk of the cloning time.
+        used = create_snapshot(self.repo, wdir / "tree", exclude=SNAPSHOT_EXCLUDES, method=method)
+        create_snapshot(wdir / "tree", wdir / "base", exclude=self.config.ignore, method=used)
         return used
 
     def get(self, name: str) -> Workspace:
@@ -224,7 +248,7 @@ class Store:
         ws = self.get(name)
         shutil.rmtree(ws.dir)
 
-    def refresh(self, name: str) -> Workspace:
+    def refresh(self, name: str, needs_approval: list[str] | None = None) -> Workspace:
         """Re-snapshot a workspace on top of the current repo.
 
         The previous tree is kept under ``attempts/<n>/`` so the agent (or a
@@ -240,6 +264,8 @@ class Store:
             shutil.rmtree(ws.base_dir)
             ws.method = self._snapshot_into(ws.dir, ws.method)
             ws.reads.clear()
+            if needs_approval:
+                ws.needs_approval = sorted(set(ws.needs_approval) | set(needs_approval))
             ws.save()
             return ws
 

@@ -7,7 +7,7 @@ There are two ways to use agentsnap with Claude Code. You can use both.
 Register the server once per repo:
 
 ```bash
-pip install 'agentsnap[mcp]'
+pip install -e '.[mcp]'   # from a clone of this repo
 claude mcp add agentsnap -- agentsnap-mcp --repo "$(pwd)"
 ```
 

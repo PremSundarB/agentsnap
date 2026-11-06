@@ -24,8 +24,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS runners use APFS (clonefile); Linux runners use ext4, where
-        # `cp --reflink=auto` falls back to a plain copy.
+        # macOS runners use APFS (clonefile); Linux runners use ext4, which has
+        # no reflinks, so the `cp` copy fallback is exercised there.
         os: [ubuntu-latest, macos-latest]
         python: ["3.10", "3.13"]
     runs-on: ${{ matrix.os }}
@@ -40,6 +40,28 @@ jobs:
         run: ./examples/demo.sh
       - name: Benchmark (small)
         run: python benchmarks/bench_workspaces.py --agents 5 --src-files 300 --cache-files 300 --skip-copy
+
+  # Exercise the real reflink (copy-on-write) path on Linux: GitHub runners use
+  # ext4, so mount an XFS image with reflink enabled and run the tests on it.
+  test-xfs-reflink:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Mount XFS with reflink
+        run: |
+          sudo apt-get install -y -qq xfsprogs
+          truncate -s 2G /tmp/xfs.img
+          mkfs.xfs -q -m reflink=1 /tmp/xfs.img
+          sudo mkdir -p /mnt/xfs
+          sudo mount -o loop /tmp/xfs.img /mnt/xfs
+          sudo chown "$USER" /mnt/xfs
+      - run: pip install -e ".[dev,mcp]"
+      - run: agentsnap -C /mnt/xfs doctor | tee /tmp/doctor.txt && grep -q "reflink (copy-on-write)" /tmp/doctor.txt
+      - run: TMPDIR=/mnt/xfs pytest -v
+      - run: python benchmarks/bench_workspaces.py --dir /mnt/xfs --agents 5 --src-files 300 --cache-files 300 --skip-copy
 
   build:
     runs-on: ubuntu-latest

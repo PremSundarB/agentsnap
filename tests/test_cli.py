@@ -152,3 +152,29 @@ def test_python_m_entrypoint(repo):
         [sys.executable, "-m", "agentsnap", "-C", str(repo), "list"], capture_output=True, text=True
     )
     assert out.returncode == 0 and "no workspaces" in out.stdout
+
+
+def test_approval_and_check_flow(cli, store, repo):
+    cli("new", "a", "b")
+    write(store.get("a").tree, "README.md", "a\n")
+    write(store.get("b").tree, "README.md", "b\n")
+    cli("merge", "a")
+    rc, out, _ = cli("merge", "--policy", "rerun", "b")
+    assert rc == 1
+    write(store.get("b").tree, "README.md", "a\nplus b\n")
+
+    rc, out, _ = cli("merge", "b")
+    assert rc == 1 and "waiting for approval" in out and "--approve" in out
+
+    rc, out, _ = cli("merge", "b", "--approve", "--check", "exit 3")
+    assert rc == 1 and "check failed (exit 3)" in out
+    assert read(repo, "README.md") == "a\n"
+
+    rc, out, _ = cli("merge", "b", "--approve", "--check", "true")
+    assert rc == 0 and "check passed" in out
+    assert read(repo, "README.md") == "a\nplus b\n"
+
+
+def test_doctor(cli):
+    rc, out, _ = cli("doctor")
+    assert rc == 0 and "snapshots:" in out and "ok  copy" in out

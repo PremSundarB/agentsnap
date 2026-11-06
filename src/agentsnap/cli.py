@@ -135,37 +135,60 @@ def cmd_merge(store: Store, args) -> int:
     rc = EXIT_OK
     for name in args.names:
         res = merge_workspace(
-            store, name, policy=args.policy, dry_run=args.dry_run, commit=args.commit, message=args.message
+            store,
+            name,
+            policy=args.policy,
+            dry_run=args.dry_run,
+            commit=args.commit,
+            message=args.message,
+            approve=args.approve,
+            check=args.check,
+            check_timeout=args.check_timeout,
         )
         if args.json:
             _print_json(res.to_dict())
         else:
             _print_merge(res)
-        if res.conflicts:
+        if res.conflicts or res.awaiting_approval or not res.check_passed:
             rc = EXIT_CONFLICT
     return rc
 
 
 def _print_merge(res) -> None:
+    name = res.workspace
     verb = "would merge" if res.dry_run else "merged"
     if res.conflicts:
-        print(f"{res.workspace}: NOT merged, {len(res.conflicts)} conflict(s) (policy: {res.policy})")
+        print(f"{name}: NOT merged, {len(res.conflicts)} conflict(s) (policy: {res.policy})")
         for c in res.conflicts:
             print(f"  CONFLICT {c.describe()}")
         if res.refreshed:
             print("  workspace re-snapshotted on the latest repo; previous tree kept in attempts/.")
-            print("  re-run the agent's task in the workspace, then merge again.")
+            print("  re-run the agent's task in the workspace, then merge again (a person approves).")
         elif res.policy == "human":
             print("  options: --policy merge3 (line-level merge), --policy rerun (redo on latest),")
             print("           --policy force (overwrite; only after review), or edit by hand.")
+    elif res.awaiting_approval:
+        print(f"{name}: NOT merged, waiting for approval")
+        print(f"  this workspace resolved earlier conflicts in: {', '.join(res.awaiting_approval)}")
+        print(f"  review with `agentsnap diff {name}`, then `agentsnap merge {name} --approve`")
+    elif not res.check_passed:
+        assert res.check is not None
+        print(f"{name}: NOT merged, check failed (exit {res.check['returncode']}): {res.check['command']}")
+        tail = res.check["output"].strip().splitlines()[-15:]
+        for line in tail:
+            print(f"  | {line}")
     elif not res.applied:
-        print(f"{res.workspace}: nothing to merge")
+        print(f"{name}: nothing to merge")
     else:
-        print(f"{res.workspace}: {verb} {len(res.applied)} file(s)")
+        print(f"{name}: {verb} {len(res.applied)} file(s)")
         for path, how in sorted(res.applied.items()):
             print(f"  {how:<10} {path}")
+        if res.check:
+            print(f"  check passed: {res.check['command']}")
         if res.commit:
             print(f"  committed {res.commit[:12]}")
+        elif res.commit_error:
+            print(f"  not committed: {res.commit_error}")
     for c in res.warnings:
         print(f"  warning {c.describe()}")
 
@@ -239,6 +262,26 @@ def cmd_record_read(store: Store, args) -> int:
     return EXIT_OK
 
 
+def cmd_doctor(store: Store, args) -> int:
+    """Report which snapshot methods work for this repo and what config is active."""
+    from .snapshot import available_methods, probe_methods
+
+    print(f"repo:         {store.repo}")
+    print(f"state dir:    {store.root} ({'exists' if store.root.exists() else 'not created yet'})")
+    works = probe_methods(store.repo)
+    for m in available_methods():
+        mark = "ok " if m in works else "-- "
+        print(f"  {mark} {m}")
+    best = works[0] if works else "none"
+    cow = best in ("apfs", "reflink")
+    print(f"snapshots:    {best} ({'copy-on-write' if cow else 'full copies: no CoW on this filesystem'})")
+    if store.config.snapshot_method:
+        print(f"forced:       {store.config.snapshot_method} (config)")
+    print(f"merge check:  {store.config.merge_check or '(none)'}")
+    print(f"workspaces:   {len(store.list())}")
+    return EXIT_OK
+
+
 def cmd_mcp(store: Store, args) -> int:
     from .mcp_server import main as mcp_main
 
@@ -268,7 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("new", cmd_new, "create workspace(s): a copy-on-write snapshot of the repo")
     sp.add_argument("names", nargs="+", metavar="NAME")
-    sp.add_argument("--method", choices=["apfs", "reflink", "copy"], help="force a snapshot method")
+    sp.add_argument("--method", choices=["apfs", "reflink", "cp", "copy"], help="force a snapshot method")
     sp.add_argument("-q", "--quiet", action="store_true", help="print only the workspace path")
     sp.add_argument("--json", action="store_true")
 
@@ -296,6 +339,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("-n", "--dry-run", action="store_true")
     sp.add_argument("--commit", action="store_true", help="git commit the merged files")
     sp.add_argument("-m", "--message", help="commit message (with --commit)")
+    sp.add_argument(
+        "--approve", action="store_true", help="approve a workspace that resolved earlier conflicts"
+    )
+    sp.add_argument(
+        "--check",
+        metavar="CMD",
+        help="shell command that must pass on the merged result first (default: merge_check in config)",
+    )
+    sp.add_argument("--check-timeout", type=float, metavar="SECS")
     sp.add_argument("--json", action="store_true")
 
     sp = add("refresh", cmd_refresh, "re-snapshot a workspace on the latest repo (keeps old tree)")
@@ -314,6 +366,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("-w", "--workspace")
     sp.add_argument("-v", "--verbose", action="store_true")
 
+    add("doctor", cmd_doctor, "show which snapshot methods work here and the active config")
     add("mcp", cmd_mcp, "run the MCP server on stdio")
     return p
 

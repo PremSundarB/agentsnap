@@ -1,14 +1,17 @@
 import os
 import stat
+import tempfile
+from pathlib import Path
 
 import pytest
 
 from agentsnap import snapshot
-from agentsnap.snapshot import SnapshotError, available_methods, clone_path, create_snapshot
+from agentsnap.snapshot import SnapshotError, available_methods, clone_path, create_snapshot, probe_methods
 
 from .conftest import contents, read, write
 
-METHODS = available_methods()
+# Methods that work on the filesystem pytest uses (e.g. no reflinks on ext4).
+METHODS = probe_methods(Path(tempfile.gettempdir()))
 
 
 @pytest.mark.parametrize("method", METHODS)
@@ -87,3 +90,25 @@ def test_existing_destination_is_left_untouched(repo, tmp_path, method):
 def test_clone_path_directory(repo, tmp_path, method):
     clone_path(repo / "src", tmp_path / "src-copy", method=method)
     assert read(tmp_path / "src-copy", "util.py") == read(repo, "src/util.py")
+
+
+def test_failed_method_is_skipped_next_time(repo, tmp_path, monkeypatch):
+    calls = []
+
+    def broken(src, dst):
+        calls.append(src)
+        raise OSError(45, "Operation not supported")
+
+    monkeypatch.delenv(snapshot.METHOD_ENV, raising=False)
+    monkeypatch.setattr(snapshot, "available_methods", lambda: ["apfs", "copy"])
+    monkeypatch.setitem(snapshot._CLONERS, "apfs", broken)
+    assert create_snapshot(repo, tmp_path / "one") == "copy"
+    assert create_snapshot(repo, tmp_path / "two") == "copy"
+    assert len(calls) == 1  # not retried on the same device
+
+
+def test_probe_methods(tmp_path):
+    works = probe_methods(tmp_path)
+    assert works and works[-1] == "copy"
+    assert set(works) <= set(available_methods())
+    assert list(tmp_path.iterdir()) == []  # probe cleans up

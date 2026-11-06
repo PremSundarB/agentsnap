@@ -57,6 +57,14 @@ def read(root: Path, rel: str) -> str:
     return (root / rel).read_text()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_snapshot_state(monkeypatch):
+    """Tests that simulate a failing method must not affect later tests."""
+    from agentsnap import snapshot
+
+    monkeypatch.setattr(snapshot, "_failed", set())
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"

@@ -136,3 +136,9 @@ def test_config_extra_ignore(repo):
     ws = store.create("a")
     write(ws.tree, "generated/out.txt", "y\n")
     assert not ws.changes()
+
+
+def test_base_skips_ignored_top_level_dirs(store):
+    ws = store.create("a")
+    assert (ws.tree / "node_modules/pkg/index.js").exists()
+    assert not (ws.base_dir / "node_modules").exists()

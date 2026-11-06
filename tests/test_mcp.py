@@ -116,3 +116,30 @@ def test_errors_are_readable(repo):
         call(s, "create_workspace", name="../evil")
     with pytest.raises(ToolFailed, match="no workspace named"):
         call(s, "workspace_status", name="ghost")
+
+
+def test_agent_cannot_approve_its_own_resolution(repo):
+    s = build_server(repo)
+    merge_tool = next(t for t in asyncio.run(s.list_tools()) if t.name == "merge_workspace")
+    schema = getattr(merge_tool, "input_schema", None) or getattr(merge_tool, "inputSchema", {})
+    assert "approve" not in schema.get("properties", {})
+    assert "check" not in schema.get("properties", {})
+
+    call(s, "create_workspace", name="a")
+    call(s, "create_workspace", name="b")
+    call(s, "write_file", workspace="a", path="README.md", content="a\n")
+    call(s, "write_file", workspace="b", path="README.md", content="b\n")
+    call(s, "merge_workspace", name="a")
+    call(s, "merge_workspace", name="b", policy="rerun")
+    call(s, "write_file", workspace="b", path="README.md", content="a\nb\n")
+    res = call(s, "merge_workspace", name="b")
+    assert not res["merged"] and res["awaiting_approval"] == ["README.md"]
+
+
+def test_configured_check_applies_to_mcp_merges(repo):
+    write(repo, ".agentsnap/config.json", '{"merge_check": "exit 1"}')
+    s = build_server(repo)
+    call(s, "create_workspace", name="a")
+    call(s, "write_file", workspace="a", path="x.txt", content="x")
+    res = call(s, "merge_workspace", name="a")
+    assert not res["merged"] and res["check"]["returncode"] == 1

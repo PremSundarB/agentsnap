@@ -93,3 +93,10 @@ def test_describe_and_dict_cover_all_kinds():
         c = Conflict(path="p", kind=kind, workspaces=("a", "b"))
         assert "p" in c.describe()
         assert c.to_dict()["kind"] == kind
+
+
+def test_reads_of_ignored_paths_are_not_reported(store, repo):
+    a = store.create("a")
+    a.reads.record(["node_modules/pkg/index.js"])
+    write(repo, "node_modules/pkg/index.js", "upgraded\n")
+    assert check(store).conflicts == []

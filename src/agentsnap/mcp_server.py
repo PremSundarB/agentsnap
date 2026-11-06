@@ -14,7 +14,7 @@ Typical agent flow:
    through ``read_file`` (or a read hook) lets agentsnap warn about stale reads.
 3. ``check_conflicts()`` then ``merge_workspace("fix-login")``.
 
-Requires the optional dependency: ``pip install 'agentsnap[mcp]'``.
+Requires the optional MCP SDK (``pip install mcp``, or install this package with the ``[mcp]`` extra).
 """
 
 from __future__ import annotations
@@ -40,6 +40,12 @@ When done, call check_conflicts and then merge_workspace. If a merge reports
 conflicts, do not force it: either retry with policy "merge3", or use policy
 "rerun" to get a fresh snapshot with the other agents' changes and redo the
 task there, or ask the user.
+
+After a rerun, your next merge reports "awaiting_approval": a person must
+review it. Tell the user to run `agentsnap merge <name> --approve`; you cannot
+approve it yourself. If the user configured a merge check (for example the test
+suite), a merge whose check fails is not applied; read the check output and fix
+the problem in your workspace.
 """
 
 MAX_READ_BYTES = 2_000_000
@@ -60,7 +66,7 @@ def _sdk():
 
         return FastMCP, ToolError
     except ImportError as exc:
-        raise SystemExit("agentsnap-mcp needs the MCP SDK: pip install 'agentsnap[mcp]'") from exc
+        raise SystemExit("agentsnap-mcp needs the MCP SDK: pip install mcp") from exc
 
 
 def _resolve_in(ws: Workspace, rel: str) -> Path:
@@ -170,6 +176,10 @@ def build_server(repo: Path):
         policy: "human" (stop on conflict), "merge3" (try a line-level 3-way
         merge), "rerun" (on conflict, re-snapshot so you can redo the task),
         "force" (overwrite; only with the user's explicit approval).
+
+        The result says whether it merged. If "awaiting_approval" is set, ask
+        the user to run `agentsnap merge <name> --approve`. If "check" shows a
+        non-zero returncode, the user's merge check failed on the merged result.
         """
         return merge_workspace(store, name, policy=Policy(policy), dry_run=dry_run, commit=commit).to_dict()
 
