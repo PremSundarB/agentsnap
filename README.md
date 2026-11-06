@@ -91,7 +91,7 @@ pip install -e '.[dev,mcp]' && pytest   # for development
 
 ```bash
 cd your-repo
-agentsnap new fix-login add-tests          # two workspaces, a few ms each
+agentsnap new fix-login add-tests          # two workspaces, milliseconds each
 cd "$(agentsnap path fix-login)"           # ...or point an agent at this directory
 # agents edit their own trees in parallel
 
@@ -104,8 +104,9 @@ agentsnap merge add-tests --check "pytest -q"   # only land it if tests pass on 
 agentsnap drop fix-login add-tests
 ```
 
-A full walkthrough with three scripted agents: [`examples/demo.sh`](examples/demo.sh).
-Its output:
+A full walkthrough with scripted agents is in [`examples/demo.sh`](examples/demo.sh).
+Its second scene shows `--check` catching two edits that never touch the same
+file but break each other. Excerpt from the first scene:
 
 ```
 $ agentsnap conflicts
@@ -143,7 +144,7 @@ headless agents from the shell, or to track reads with a hook, see
 
 | command | description |
 |---|---|
-| `agentsnap new NAME...` | create workspaces (`-q` prints only the path, `--method apfs\|reflink\|copy`) |
+| `agentsnap new NAME...` | create workspaces (`-q` prints only the path, `--method apfs\|reflink\|cp\|copy`) |
 | `agentsnap list` | workspaces with `+added ~modified -deleted` counts |
 | `agentsnap path NAME` | print a workspace's directory |
 | `agentsnap status [NAME]` | changed files per workspace |
@@ -157,7 +158,7 @@ headless agents from the shell, or to track reads with a hook, see
 | `agentsnap doctor` | which snapshot methods work on this filesystem, and the active config |
 | `agentsnap mcp` | run the MCP server on stdio |
 
-Every reporting command accepts `--json`.
+`new`, `list`, `status`, `conflicts` and `merge` accept `--json` for scripting.
 
 ## Results so far
 
