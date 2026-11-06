@@ -90,7 +90,7 @@ Or drive it from the shell: `agentsnap run fix-login -- claude -p "fix the login
 ## Try it
 
 ```bash
-git clone https://github.com/OWNER/agentsnap && cd agentsnap
+git clone https://github.com/PremSundarB/agentsnap && cd agentsnap
 pip install -e '.[mcp]'
 ./examples/demo.sh
 ```

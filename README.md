@@ -5,7 +5,7 @@ Each agent gets its own copy-on-write snapshot of the repository in milliseconds
 agentsnap tracks what each agent changed, catches overlapping edits before
 anything is merged, and merges clean work back automatically.
 
-[![CI](https://github.com/OWNER/agentsnap/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/agentsnap/actions/workflows/ci.yml)
+[![CI](https://github.com/PremSundarB/agentsnap/actions/workflows/ci.yml/badge.svg)](https://github.com/PremSundarB/agentsnap/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
@@ -82,7 +82,7 @@ applies the database answer, optimistic concurrency control, to agent workspaces
 > unrelated project, so do not `pip install agentsnap`. Install from source:
 
 ```bash
-git clone https://github.com/OWNER/agentsnap && cd agentsnap
+git clone https://github.com/PremSundarB/agentsnap && cd agentsnap
 python -m venv .venv && source .venv/bin/activate
 pip install -e .            # CLI only, no dependencies
 pip install -e '.[mcp]'     # plus the MCP server for Claude Code / Cursor / Codex

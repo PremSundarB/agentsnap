@@ -5,7 +5,7 @@ Thanks for helping. Issues, bug reports, docs fixes and code are all welcome.
 ## Set up
 
 ```bash
-git clone https://github.com/OWNER/agentsnap && cd agentsnap
+git clone https://github.com/PremSundarB/agentsnap && cd agentsnap
 python -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev,mcp]'
 pytest                 # about 100 tests, a few seconds
